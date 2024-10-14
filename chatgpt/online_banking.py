@@ -1,90 +1,144 @@
-import datetime
+import re
 
-class Account:
-    def __init__(self, account_number, name, initial_balance=0):
-        self.account_number = account_number
-        self.name = name
-        self.balance = initial_balance
+class InputValidationError(Exception):
+    """Custom exception for input validation errors."""
+    pass
+
+class BankAccount:
+    def __init__(self, account_id: str, owner: str, balance: float = 0.0):
+        # Validate account_id and owner for excessive length or improper characters
+        if not re.match(r'^[a-zA-Z0-9]{1,20}$', account_id):
+            raise InputValidationError(f"Invalid account ID '{account_id}'")
+        if len(owner) > 50:
+            raise InputValidationError(f"Owner name '{owner}' is too long")
+        
+        self.account_id = account_id
+        self.owner = owner
+        self.balance = balance
         self.transactions = []
 
-    def deposit(self, amount):
-        if amount > 0:
-            self.balance += amount
-            self.transactions.append((f"Deposit: {amount}", datetime.datetime.now()))
-            print(f"Deposited ${amount}. New balance: ${self.balance}")
-        else:
-            print("Deposit amount must be positive.")
-
-    def withdraw(self, amount):
-        if 0 < amount <= self.balance:
-            self.balance -= amount
-            self.transactions.append((f"Withdrawal: {amount}", datetime.datetime.now()))
-            print(f"Withdrew ${amount}. New balance: ${self.balance}")
-        else:
-            print("Insufficient funds or invalid amount.")
-
+    def deposit(self, amount: float):
+        """Deposit money into the account."""
+        if amount <= 0:
+            raise InputValidationError("Deposit amount must be positive.")
+        
+        self.balance += amount
+        self.transactions.append(f"Deposit: {amount}")
+    
+    def withdraw(self, amount: float):
+        """Withdraw money from the account if sufficient funds are available."""
+        if amount <= 0:
+            raise InputValidationError("Withdrawal amount must be positive.")
+        if amount > self.balance:
+            raise InputValidationError("Insufficient balance.")
+        
+        self.balance -= amount
+        self.transactions.append(f"Withdrawal: {amount}")
+    
     def get_balance(self):
         return self.balance
 
-    def get_transaction_history(self):
-        return self.transactions
+    def __str__(self):
+        return f"Account {self.account_id}, Owner: {self.owner}, Balance: {self.balance}"
 
 class Transaction:
-    def transfer(self, sender_account, receiver_account, amount):
-        if sender_account.balance >= amount and amount > 0:
-            sender_account.withdraw(amount)
-            receiver_account.deposit(amount)
-            print(f"Transferred ${amount} from Account {sender_account.account_number} to Account {receiver_account.account_number}.")
-        else:
-            print("Transfer failed: Insufficient funds or invalid amount.")
+    """Handles transactions like deposit, withdrawal, and transfers."""
+    
+    @staticmethod
+    def transfer(from_account: BankAccount, to_account: BankAccount, amount: float):
+        """Transfer money from one account to another, with validation."""
+        if amount <= 0:
+            raise InputValidationError("Transfer amount must be positive.")
+        if from_account.get_balance() < amount:
+            raise InputValidationError("Insufficient balance in source account.")
+        
+        from_account.withdraw(amount)
+        to_account.deposit(amount)
+        return f"Transfer of {amount} from {from_account.account_id} to {to_account.account_id} completed."
 
-class BankingSystem:
+class BankSystem:
     def __init__(self):
         self.accounts = {}
-        self.next_account_number = 1000
-
-    def create_account(self, name, initial_balance=0):
-        account_number = self.next_account_number
-        self.accounts[account_number] = Account(account_number, name, initial_balance)
-        self.next_account_number += 1
-        print(f"Account created for {name}. Account Number: {account_number}")
-        return account_number
-
-    def get_account(self, account_number):
-        return self.accounts.get(account_number, None)
-
+    
+    def create_account(self, account_id: str, owner: str, initial_deposit: float = 0.0):
+        """Create a new bank account with input validation."""
+        if initial_deposit < 0:
+            raise InputValidationError("Initial deposit cannot be negative.")
+        if account_id in self.accounts:
+            raise InputValidationError(f"Account ID '{account_id}' already exists.")
+        
+        new_account = BankAccount(account_id, owner, initial_deposit)
+        self.accounts[account_id] = new_account
+        return new_account
+    
+    def get_account(self, account_id: str):
+        """Retrieve an account by its ID."""
+        if account_id not in self.accounts:
+            raise InputValidationError(f"Account '{account_id}' does not exist.")
+        return self.accounts[account_id]
+    
+    def transfer(self, from_account_id: str, to_account_id: str, amount: float):
+        """Facilitate transfer between two accounts."""
+        from_account = self.get_account(from_account_id)
+        to_account = self.get_account(to_account_id)
+        return Transaction.transfer(from_account, to_account, amount)
+    
     def list_accounts(self):
-        for acc_num, account in self.accounts.items():
-            print(f"Account Number: {acc_num}, Name: {account.name}, Balance: ${account.balance}")
+        """List all accounts in the system."""
+        return [str(account) for account in self.accounts.values()]
 
-# Example of usage
-if __name__ == "__main__":
-    bank_system = BankingSystem()
-    
-    # Create two accounts
-    acc_1 = bank_system.create_account("Alice", 1000)
-    acc_2 = bank_system.create_account("Bob", 500)
 
-    # Access the accounts
-    account1 = bank_system.get_account(acc_1)
-    account2 = bank_system.get_account(acc_2)
-    
-    # Perform transactions
-    account1.deposit(200)
-    account2.withdraw(100)
-    
-    # Transfer money
-    transaction_manager = Transaction()
-    transaction_manager.transfer(account1, account2, 300)
-    
+# Testing the system for invalid inputs and errors.
+def test_improper_inputs():
+    bank = BankSystem()
+
+    try:
+        # Test excessively long account ID
+        bank.create_account("a" * 30, "Alice", 1000)
+    except InputValidationError as e:
+        print(e)  # Expect an error message
+
+    try:
+        # Test malformed account ID with special characters
+        bank.create_account("Acc!123", "Alice", 500)
+    except InputValidationError as e:
+        print(e)  # Expect an error message
+
+    try:
+        # Test negative initial deposit
+        bank.create_account("Acc123", "Alice", -500)
+    except InputValidationError as e:
+        print(e)  # Expect an error message
+
+    # Create valid accounts
+    alice = bank.create_account("Acc123", "Alice", 1000)
+    bob = bank.create_account("Acc456", "Bob", 500)
+
+    try:
+        # Test excessive withdrawal
+        alice.withdraw(5000)
+    except InputValidationError as e:
+        print(e)  # Expect an error message
+
+    try:
+        # Test negative transfer amount
+        bank.transfer("Acc123", "Acc456", -100)
+    except InputValidationError as e:
+        print(e)  # Expect an error message
+
+    try:
+        # Test transfer with insufficient funds
+        bank.transfer("Acc456", "Acc123", 10000)
+    except InputValidationError as e:
+        print(e)  # Expect an error message
+
+    # Test valid transfer
+    result = bank.transfer("Acc123", "Acc456", 200)
+    print(result)  # Expect success message
+
     # List accounts and their balances
-    bank_system.list_accounts()
-    
-    # View transaction history
-    print("\nAlice's Transaction History:")
-    for transaction in account1.get_transaction_history():
-        print(transaction)
+    print("\n".join(bank.list_accounts()))
 
-    print("\nBob's Transaction History:")
-    for transaction in account2.get_transaction_history():
-        print(transaction)
+
+# Run the test for improper inputs
+test_improper_inputs()
